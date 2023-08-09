@@ -5,6 +5,7 @@ from os import path
 from typing import Annotated, Optional, cast
 
 import typer
+from more_itertools import quantify
 
 from .constants import SHADER_DIRS
 from .helpers import resolve_shader_path
@@ -29,6 +30,13 @@ def off() -> int:
     return clear_screen_shader()
 
 
+def is_same_shader(s: str | None, s2: str | None) -> bool:
+    if s is None or s2 is None:
+        return False
+    s, s2 = resolve_shader_path(s), resolve_shader_path(s2)
+    return path.samefile(s, s2)
+
+
 @app.command()
 def toggle(
     shader_name_or_path: Annotated[
@@ -50,6 +58,16 @@ def toggle(
             show_default=False,
         ),
     ] = False,
+    fallback_auto: Annotated[
+        bool,
+        typer.Option(
+            "--fallback-auto",
+            help="Use currently scheduled shader as fallback."
+            " (If the currently scheduled shader is SHADER_NAME_OR_PATH, the default"
+            " shader will be used as the fallback instead.)",
+            show_default=False,
+        ),
+    ] = False,
 ) -> int:
     """Toggle screen shader.
 
@@ -57,33 +75,36 @@ def toggle(
 
     When --fallback is specified, will toggle between SHADER_NAME_OR_PATH and the
     fallback shader. --fallback-default will toggle between SHADER_NAME_OR_PATH and the
-    default shader.
+    default shader, whereas --fallback-auto will toggle between SHADER_NAME_OR_PATH and
+    the currently scheduled shader. (--fallback-auto is equivalent to --fallback-default
+    if the currently scheduled shader is SHADER_NAME_OR_PATH.)
     """
 
     from .config import Config
 
-    if fallback and fallback_default:
-        raise typer.BadParameter(
-            "Cannot specify both --fallback and --fallback-default"
-        )
+    fallback_opts = [fallback, fallback_default, fallback_auto]
+    if quantify(fallback_opts) > 1:
+        raise typer.BadParameter("Cannot specify more than 1 --fallback* option")
 
     t = datetime.now().time()
     schedule = Config().to_schedule()
+    scheduled_shade = schedule.find_shade(t)
+    current_shader = get_screen_shader()
 
-    if fallback_default:
+    shade = shader_name_or_path or scheduled_shade
+
+    if fallback_default or (fallback_auto and is_same_shader(shade, scheduled_shade)):
         fallback = schedule.default_shade_name
+    elif fallback_auto:
+        fallback = scheduled_shade
     toggle_off = off if fallback is None else lambda: on(cast(str, fallback))
 
-    shade = shader_name_or_path or schedule.find_shade(t)
-    if shade is None:
-        return off()
-    shade = resolve_shader_path(shade)
-
-    current_shader = get_screen_shader()
-    if current_shader is not None and path.samefile(shade, current_shader):
+    if is_same_shader(shade, current_shader):
         return toggle_off()
+    if shade is not None:
+        return on(shade)
 
-    return on(shade)
+    return 0
 
 
 @app.command()

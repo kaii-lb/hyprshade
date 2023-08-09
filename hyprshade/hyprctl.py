@@ -16,6 +16,8 @@ def clear_screen_shader() -> int:
 
 
 def get_screen_shader() -> str | None:
+    """Gets full path of currently set screen shader."""
+
     try:
         o = json.load(os.popen("hyprctl -j getoption decoration:screen_shader"))
     except JSONDecodeError as e:
